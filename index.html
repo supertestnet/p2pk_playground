@@ -168,10 +168,8 @@
                 }
                 if ( part_1.length !== 66 ) part_1 = loop( part_1 );
                 if ( part_2.length !== 66 ) part_2 = loop( part_2 );
-                part_1_size = ( part_1.length / 2 ).toString( 16 );
-                part_2_size = ( part_2.length / 2 ).toString( 16 );
-                if ( part_1_size.length % 2 ) part_1_size = "0" + part_1_size;
-                if ( part_2_size.length % 2 ) part_2_size = "0" + part_2_size;
+                part_1_size = ( part_1.length / 2 ).toString( 16 ).padStart( 2, "0" );
+                part_2_size = ( part_2.length / 2 ).toString( 16 ).padStart( 2, "0" );
                 var suffix = `02${part_1_size}${part_1}02${part_2_size}${part_2}`;
                 var suffix_size = ( suffix.length / 2 ).toString( 16 );
                 if ( suffix_size.length % 2 ) suffix_size = "0" + suffix_size;
@@ -668,7 +666,6 @@
                 .addInput({
                     hash: to_pubkey_txid,
                     index: 0,
-                    nonWitnessUtxo: Buffer.from( $( '.tx_to_pubkey_greybox' ).innerText, "hex" ),
                 })
                 .addOutput({
                     value: to_pubkey_amnt - 500,
@@ -680,7 +677,7 @@
                 var sig = keyPairSender.sign( Buffer.from( sighash, "hex" ) ).toString( "hex" );
                 sig = sigToDER( sig );
                 sig = sig + "01";
-                tx.ins[ 0 ].script = Buffer.from( bytesToHex( new Uint8Array( [ ( sig.length / 2 ), ...hexToBytes( sig ) ] ) ), "hex" );
+                tx.ins[ 0 ].script = Buffer.from( ( sig.length / 2 ).toString( 16 ).padStart( 2, "0" ) + sig, "hex" );
                 var txhex = tx.toHex();
                 var from_pubkey_txid = tx.getId();
                 $( '.from_pubkey_txid' ).innerHTML = `<a href="https://mempool.space/signet/tx/${from_pubkey_txid}" target="_blank">${from_pubkey_txid}</a>`;
