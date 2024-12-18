@@ -4,6 +4,9 @@ A site for creating P2PK outputs in bitcoin i.e. paying someone's raw public key
 # Here's how to try it
 Just click here: https://supertestnet.github.io/p2pk_playground/
 
+# Video demo
+[![](https://i.ibb.co/wMQK5F1/P2-PK-playground-thumbnail.png)](https://www.youtube.com/watch?v=iuMtzYDMUbM)
+
 # FAQ
 
 ## What is a P2PK output?
