@@ -35,7 +35,7 @@ No, really! In the early days of bitcoin, it was common to send money directly t
 
 ## Do people still use P2PK outputs?
 
-The short answer is no. The long answer is yes. If you visit Clark Moody's Bitcoin Dashboard and go to the section "Output Type Counts (90 Days)" you can see that people do occasionally use them:
+The short answer is no. The long answer is yes. If you visit [Clark Moody's Bitcoin Dashboard](https://bitcoin.clarkmoody.com/dashboard/) and go to the section "Output Type Counts (90 Days)" you can see that people do occasionally use them:
 
 ![screenshot of stats about there being 30 p2pk bitcoin outputs created during a typical 90 day period](https://i.ibb.co/PNv9PLX/still-in-use.png)
 
