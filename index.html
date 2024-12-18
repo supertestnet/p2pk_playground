@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <script src="https://supertestnet.github.io/bitcoin-chess/js/bitcoinjs-lib.js"></script>
+        <meta name="viewport" content="width=device-width, user-scalable=no">
+        <script src="https://unpkg.com/@cmdcode/tapscript@1.4.0"></script>
+        <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
+        <script src="https://bundle.run/buffer@6.0.3"></script>
+        <script>var Buffer = buffer.Buffer;</script>
+        <script>
+            var hexToBytes = hex => Uint8Array.from( hex.match( /.{1,2}/g ).map( byte => parseInt( byte, 16 ) ) );
+            var bytesToHex = bytes => bytes.reduce( ( str, byte ) => str + byte.toString( 16 ).padStart( 2, "0" ), "" );
+            var isValidHex = hex => {
+                if ( !hex ) return;
+                var length = hex.length;
+                if ( length % 2 ) return;
+                try {
+                    var bigint = BigInt( "0x" + hex, "hex" );
+                } catch( e ) {
+                    return;
+                }
+                var prepad = bigint.toString( 16 );
+                var i; for ( i=0; i<length; i++ ) prepad = "0" + prepad;
+                var padding = prepad.slice( -Math.abs( length ) );
+                return ( padding === hex );
+            }
+            var getUncompressedPubkeyHexFromCompressedPubkeyHex = pubkeyhex => nobleSecp256k1.Point.fromCompressedHex( hexToBytes( pubkeyhex ) ).toHex();
+            var getCompressedPubkeyHexFromUncompressedPubkeyHex = pubkeyhex => nobleSecp256k1.Point.fromHex( pubkeyhex ).toHex( true );
+            var convertAddressToScriptPubkeyString = address => {
+                var tx = tapscript.Tx.create({
+                    vin: [{
+                        txid: "ab".repeat( 32 ),
+                        vout: 0,
+                        prevout: {
+                            value: 10_000,
+                            scriptPubKey: [ 1, "a".repeat( 64 ) ],
+                        }
+                    }],
+                    vout: [{
+                        value: 10_000,
+                        scriptPubKey: tapscript.Address.toScriptPubKey( address ),
+                    }],
+                });
+                tx = tapscript.Tx.decode( tapscript.Tx.encode( tx ) );
+                return tx.vout[ 0 ].scriptPubKey;
+            }
+            var waitSomeSeconds = num => {
+                var num = num.toString() + "000";
+                num = Number( num );
+                return new Promise( resolve => setTimeout( resolve, num ) );
+            }
+            var getData = url => {
+                return new Promise( async function( resolve, reject ) {
+                    function inner_get( url ) {
+                        var xhttp = new XMLHttpRequest();
+                        xhttp.open( "GET", url, true );
+                        xhttp.send();
+                        return xhttp;
+                    }
+                    var data = inner_get( url );
+                    data.onerror = function( e ) {
+                        resolve( "error" );
+                    }
+                    async function isResponseReady() {
+                        return new Promise( function( resolve2, reject ) {
+                            if ( !data.responseText || data.readyState != 4 ) {
+                                setTimeout( async function() {
+                                    var msg = await isResponseReady();
+                                    resolve2( msg );
+                                }, 1 );
+                            } else {
+                                resolve2( data.responseText );
+                            }
+                        });
+                    }
+                    var returnable = await isResponseReady();
+                    resolve( returnable );
+                });
+            }
+            async function getNote( item ) {
+                async function isNoteSetYet( note_i_seek ) {
+                    return new Promise( function( resolve, reject ) {
+                        if ( !note_i_seek ) {
+                            setTimeout( async function() {
+                                var msg = await isNoteSetYet( things_awaited[ item ] );
+                                resolve( msg );
+                            }, 100 );
+                        } else {
+                            resolve( note_i_seek );
+                        }
+                    });
+                }
+                async function getTimeoutData() {
+                    var note_i_seek = await isNoteSetYet( things_awaited[ item ] );
+                    return note_i_seek;
+                }
+                var returnable = await getTimeoutData();
+                return returnable;
+            }
+            var addressOnceHadMoney = async ( address, network ) => {
+                var url_half = `https://mempool.space/${network}`;
+                if ( network === "mutinynet/" ) url_half = `https://mutinynet.com/`;
+                var nonjson = await getData( url_half + "api/address/" + address );
+                var json = JSON.parse( nonjson );
+                if ( json[ "chain_stats" ][ "tx_count" ] > 0 || json[ "mempool_stats" ][ "tx_count" ] > 0 ) return true;
+                return false;
+            }
+            var loopTilAddressReceivesMoney = async ( address, network ) => {
+                var itReceivedMoney = false;
+                async function isDataSetYet( data_i_seek ) {
+                    return new Promise( ( resolve, reject ) => {
+                        if (!data_i_seek) {
+                            setTimeout( async () => {
+                                console.log( "waiting for address to receive money..." );
+                                try {
+                                    itReceivedMoney = await addressOnceHadMoney( address, network );
+                                }catch(e){}
+                                var msg = await isDataSetYet( itReceivedMoney );
+                                resolve( msg);
+                            }, 2000);
+                        } else {
+                            resolve( data_i_seek );
+                        }
+                    });
+                }
+
+                async function getTimeoutData() {
+                    var data_i_seek = await isDataSetYet( itReceivedMoney );
+                    return data_i_seek;
+                }
+
+                var returnable = await getTimeoutData();
+                return returnable;
+            }
+
+            async function addressReceivedMoneyInThisTx( address, network ) {
+                var url_half = `https://mempool.space/${network}`;
+                if ( network === "mutinynet/" ) url_half = `https://mutinynet.com/`;
+                var txid;
+                var vout;
+                var amt;
+                var nonjson = await getData( url_half + "api/address/" + address + "/txs" );
+                var json = JSON.parse( nonjson);
+                json.forEach( tx => {
+                    tx["vout"].forEach( ( output, index ) => {
+                        if ( output[ "scriptpubkey_address" ] == address ) {
+                            txid = tx[ "txid" ];
+                            vout = index;
+                            amt = output[ "value" ];
+                        }
+                    });
+                });
+                return [txid, vout, amt];
+            }
+            var sigToDER = sighex => {
+                var part_1 = sighex.substring( 0, 64 );
+                var part_2 = sighex.substring( 64 );
+                var part_1_first_byte = part_1.substring( 0, 2 );
+                var first_byte_of_part_1_is_greater_than_0x80 = parseInt( part_1_first_byte, 16 ) > 0x80;
+                var part_2_first_byte = part_2.substring( 0, 2 );
+                var first_byte_of_part_2_is_greater_than_0x80 = parseInt( part_2_first_byte, 16 ) > 0x80;
+                if ( first_byte_of_part_1_is_greater_than_0x80 ) part_1 = "00" + part_1;
+                if ( first_byte_of_part_2_is_greater_than_0x80 ) part_2 = "00" + part_2;
+                var loop = sighalf => {
+                    if ( !sighalf.startsWith( "00" ) ) return sighalf;
+                    return loop( sighalf.substring( 2 ) );
+                }
+                if ( part_1.length !== 66 ) part_1 = loop( part_1 );
+                if ( part_2.length !== 66 ) part_2 = loop( part_2 );
+                part_1_size = ( part_1.length / 2 ).toString( 16 );
+                part_2_size = ( part_2.length / 2 ).toString( 16 );
+                if ( part_1_size.length % 2 ) part_1_size = "0" + part_1_size;
+                if ( part_2_size.length % 2 ) part_2_size = "0" + part_2_size;
+                var suffix = `02${part_1_size}${part_1}02${part_2_size}${part_2}`;
+                var suffix_size = ( suffix.length / 2 ).toString( 16 );
+                if ( suffix_size.length % 2 ) suffix_size = "0" + suffix_size;
+                return `30${suffix_size}${suffix}`;
+            }
+            var isValidAddress = address => {
+                try {
+                    return !!tapscript.Address.decode( address ).script;
+                } catch( e ) {return;}
+                return;
+            }
+            var modalVanish = () => {
+                $( ".black-bg" ).classList.add( "hidden" );
+                $( ".modal" ).classList.add( "hidden" );
+            }
+            var showModal = content => {
+                $( ".modal" ).innerHTML = `<div style="overflow-y: auto; max-height: 80vh; margin-top: 1.5rem;">${content}</div>`;
+                $( ".black-bg" ).classList.remove( "hidden" );
+                $( ".modal" ).classList.remove( "hidden" );
+            }
+        </script>
+        <style>
+            * {
+                box-sizing: border-box;
+                font-size: 1.15rem;
+                font-family: Arial, sans-serif;
+            }
+            html {
+                max-width: 800px;
+                padding: 3rem 1rem;
+                margin: auto;
+                line-height: 1.25;
+                padding: 0;
+            }
+            body {
+                margin: 3rem 1rem;
+                word-wrap: break-word;
+            }
+            h1 {
+                font-size: 2rem;
+            }
+            h2 {
+                font-size: 1.5rem;
+            }
+            input {
+                line-height: 1.25;
+                width: 100%;
+                height: 1.8rem;
+                font-size: 1.15rem;
+                border: 1px solid grey;
+            }
+            .hidden {
+                display: none !important;
+            }
+            .question {
+                font-weight: bold;
+                text-decoration: underline;
+            }
+            .link {
+                color: blue;
+                text-decoration: underline;
+                cursor: pointer;
+            }
+            .step {
+                border: 1px solid black;
+                border-radius: 1rem;
+                padding: 1rem;
+                margin-top: 1rem;
+            }
+            .funding_address, .recipient_pubkey_greybox,
+            .tx_to_pubkey_greybox, .tx_from_pubkey_greybox {
+                background-color: #cccccc;
+                padding: 0.5rem;
+            }
+            .radios {
+                text-align: center;
+            }
+            .radio_container_outer {
+                display: inline-block;
+            }
+            .radio_container_inner {
+                display: flex;
+                align-items: center;
+            }
+            .radio {
+                width: .85rem;
+                margin: .5rem;
+            }
+            .recipient_pubkey {
+                text-overflow: ellipsis;
+            }
+            @media screen and (max-width: 600px) {
+            }
+        </style>
+        <style>
+            .black-bg {
+                width: 100%;
+                position: fixed;
+                top: 0;
+                left: 0;
+                background-color: black;
+                opacity: .5;
+                width: 100vw;
+                height: 100vh;
+            }
+            .modal {
+                position: fixed;
+                box-sizing: border-box;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%,-50%);
+                width: 90%;
+                max-width: 560px;
+                background-color: white;
+                border-radius: 1rem;
+                padding: 20px;
+                color: black;
+                text-align: center;
+                word-wrap: break-word;
+            }
+            .modal * {
+                color: black;
+            }
+            .modal input, .modal textarea {
+                max-width: 90%;
+            }
+        </style>
+        <script>
+            var $ = document.querySelector.bind( document );
+            var $$ = document.querySelectorAll.bind( document );
+            var url_params = new URLSearchParams( window.location.search );
+            var url_keys = url_params.keys();
+            var $_GET = {}
+            for ( var key of url_keys ) $_GET[ key ] = url_params.get( key );
+        </script>
+    </head>
+    <body>
+        <h1>P2PK Playground</h1>
+        <p>
+            Welcome to the P2PK playground, where you can create a P2PK output on bitcoin's testnet! <span class="link faq_link">Click here for FAQs.</span>
+        </p>
+        <div class="faq hidden">
+            <p class="question">
+                What is a P2PK output?
+            </p>
+            <p>
+                Don't ask that yet! First ask "what's an output?" It's easier that way.
+            </p>
+            <p class="question">
+                Okay...what's an output?
+            </p>
+            <p>
+                An output is basically another name for a "recipient" in a bitcoin transaction. Every transaction contains two sections, Inputs and Outputs. Inputs are essentially the senders; outputs are essentially the recipients. Normally, an output in a bitcoin transaction contains two things: (1) the recipient's bitcoin address (2) an amount sent there in that transaction.
+            </p>
+            <p class="question">
+                Now can I ask what a P2PK output is?
+            </p>
+            <p>
+                Yes!
+            </p>
+            <p class="question">
+                This is the weirdest FAQ I've ever read.
+            </p>
+            <p>
+                That's not a question.
+            </p>
+            <p class="question">
+                Why is this the weirdest FAQ ever?
+            </p>
+            <p>
+                Because I thought it would be funny if I wrote it this way.
+            </p>
+            <p class="question">
+                What is a P2PK output?
+            </p>
+            <p>
+                P2PK means "pay to pubkey." A P2PK output is an output like normal except instead of sending money to a bitcoin address, the transaction sends money to a "raw pubkey." So the output looks funny -- there's just a public key there, not a normal bitcoin address.
+            </p>
+            <p class="question">
+                Wait, you can send someone bitcoin without having their bitcoin address? 
+            </p>
+            <p>
+                Yes!
+            </p>
+            <p class="question">
+                I don't know, Rick, sounds fake. 
+            </p>
+            <p>
+                No, really! In the early days of bitcoin, it was common to send money directly to your recipient's public key, by requesting a new one from their node whenever you wanted to send them money. Eventually, it became popular to use bitcoin addresses instead, because they were designed for "offline" usage -- you could just stick them on a website somewhere without needing to run a node and keep it online to dole out pubkeys. But bitcoin still supports the old ways because devs are sticklers about backward compatibility.
+            </p>
+            <p class="question">
+                Do people still use P2PK outputs? 
+            </p>
+            <p>
+                The short answer is no. The long answer is yes. If you visit <a href="https://bitcoin.clarkmoody.com/dashboard/" target="_blank">Clark Moody's Bitcoin Dashboard</a> and go to the section "Output Type Counts (90 Days)" you can see that people do occasionally use them:
+            </p>
+            <p>
+                <img src="https://i.ibb.co/PNv9PLX/still-in-use.png" style="width: 100%">
+            </p>
+            <p>
+                But hardly ever.
+            </p>
+            <p class="question">
+                Can I make a P2PK output? 
+            </p>
+            <p>
+                Yes! Just follow the instructions below and you'll make a P2PK output of your own.
+            </p>
+        </div>
+        <div class="step step_1">
+            <p class="question">
+                Step 1
+            </p>
+            <p>
+                Use bitcoin's "signet" network to send fake bitcoins (also known as "signet coins") to this testnet bitcoin address:
+            </p>
+            <p class="funding_address"></p>
+            <p>
+                If you don't have signet coins, send them using this faucet:
+            </p>
+            <p>
+                <a href="https://signet.dcorral.com/" target="_blank">Signet faucet</a>
+            </p>
+        </div>
+        <div class="step step_2">
+            <p class="question">
+                Step 2
+            </p>
+            <p>
+                Choose whether you want to use a "compressed" pubkey or an "uncompressed" one. Compressed pubkeys are the norm in bitcoin because they are about half the size of uncompressed ones, and thus, cheaper; but in the early days of bitcoin, I'm not sure Satoshi knew compressed pubkeys were a thing, so he made uncompressed ones the default, til someone came along later and fixed it. But for the sake of backwards compatibility, uncompressed ones still work. Make your choice!
+            </p>
+            <div class="radios">
+                <div class="radio_container_outer">
+                    <div class="radio_container_inner">
+                        <input class="radio compressed" type="radio" id="compressed"><label for="compressed">Compressed</label>
+                    </div>
+                </div>
+                <div class="radio_container_outer">
+                    <div class="radio_container_inner">
+                        <input class="radio uncompressed" type="radio" id="uncompressed"><label for="uncompressed">Uncompressed</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="step step_3">
+            <p class="question">
+                Step 3
+            </p>
+            <p>
+                Enter a pubkey (one that starts with 02 or 03). If you don't have one, click "Generate pubkey" to make one.
+            </p>
+            <p><input class="recipient_pubkey"></p>
+            <p class="recipient_pubkey_greybox_label question hidden">Your pubkey</p>
+            <p class="recipient_pubkey_greybox hidden"></p>
+            <p><button class="generate_pubkey">Generate pubkey</button></p>
+            <!-- <p class="recipient_privkey hidden"></p> -->
+        </div>
+        <div class="step step_4">
+            <p class="question">
+                Step 4
+            </p>
+            <p>
+                Click the Submit button. When you do, several things will happen at once:
+            </p>
+            <ol>
+                <li>The previous steps will disappear (including this one)</li>
+                <li>A bitcoin transaction will be created that sends money from the address in step 1 to the raw pubkey in step 2</li>
+                <li>Some new steps will appear, displaying your transaction and telling you what to do next</li>
+            </ol>
+            <p><button class="create_transaction">Submit</button></p>
+        </div>
+        <div class="step step_5 hidden">
+            <p class="question">
+                Step 5
+            </p>
+            <p>
+                Here is your transaction:
+            </p>
+            <p class="tx_to_pubkey_greybox"></p>
+            <p>
+                Go to <a href="https://mempool.space/signet/tx/push" target="_blank">this site</a> and broadcast it by pasting it into the field that says "Broadcast Transaction" and then clicking the Broadcast Transaction button.
+            </p>
+        </div>
+        <div class="step step_6 hidden">
+            <p class="question">
+                Step 6
+            </p>
+            <p>
+                View your transaction here to see how weird it looks:
+            </p>
+            <p class="to_pubkey_txid"></p>
+            <p>
+                NOTE: the above link won't work til you've completed step 5.
+            </p>
+        </div>
+        <div class="step step_7 hidden">
+            <p class="question">
+                Step 7
+            </p>
+            <p>
+                Now it's time to spend from your raw pubkey. Enter a bitcoin address (NOT a raw pubkey) where you want to send the money that's currently in your pubkey.
+            </p>
+            <p><input class="final_destination"></p>
+            <p>
+                If you don't know where to send it, try pasting my signet address:
+            </p>
+            <p>
+                tb1pj0rkn0qvvc5yg876qzh5ee56dutprku826ps3uantpx4vx3mujnq3u6uhm
+            </p>
+        </div>
+        <div class="step step_8 hidden">
+            <p class="question">
+                Step 8
+            </p>
+            <p class="enter_privkey_instructions hidden">
+                Enter the privkey to whatever pubkey you entered in step 3.
+            </p>
+            <p class="privkey_to_pubkey hidden"><input></p>
+            <p>
+                Hit submit. A raw transaction will be created and displayed in this box, and you should broadcast it here:
+            </p>
+            <p>
+                <a href="https://mempool.space/signet/tx/push" target="_blank">Transaction Broadcaster</a>
+            </p>
+            <p class="tx_from_pubkey_greybox_label question hidden">Broadcast this transaction</p>
+            <p class="tx_from_pubkey_greybox hidden"></p>
+            <p><button class="final_transaction">Submit</button></p>
+        </div>
+        <div class="step step_9 hidden">
+            <p class="question">
+                Step 9
+            </p>
+            <p>
+                You're done! There is no Step 9. If you followed the above steps correctly, you sent money to a raw pubkey and then "spent from" that raw pubkey to send the money somewhere else. You're an expert bitcoiner!
+            </p>
+            <p class="from_pubkey_txid_label hidden">
+                View your transaction here:
+            </p>
+            <p class="from_pubkey_txid hidden"></p>
+            <p class="from_pubkey_txid_label_2 hidden">
+                NOTE: the above link won't work til you've completed step 8.
+            </p>
+        </div>
+        <script>
+            var privkey = null;
+            var pubkey = null;
+            var uncompressed_pubkey = null;
+            var to_pubkey_txid = null;
+            var to_pubkey_amnt = null;
+            var to_pubkey_size = 21;
+            var funding_privkey = bytesToHex( nobleSecp256k1.utils.randomPrivateKey() );
+            var funding_pubkey = nobleSecp256k1.getPublicKey( funding_privkey, true ).substring( 2 );
+            var funding_address = tapscript.Address.fromScriptPubKey( [ 1, funding_pubkey ], "testnet" );
+            $( '.funding_address' ).innerText = funding_address;
+            $( '.compressed' ).checked = true;
+            $( '.uncompressed' ).checked = false;
+            $( '.recipient_pubkey' ).value = "";
+            $( '.final_destination' ).value = "";
+            $( '.faq_link' ).onclick = () => {
+                if ( $( '.faq' ).classList.contains( "hidden" ) ) $( '.faq' ).classList.remove( "hidden" );
+                else $( '.faq' ).classList.add( "hidden" );
+            }
+            $( '.generate_pubkey' ).onclick = () => {
+                privkey = bytesToHex( nobleSecp256k1.utils.randomPrivateKey() );
+                pubkey = nobleSecp256k1.getPublicKey( privkey, true );
+                uncompressed_pubkey = getUncompressedPubkeyHexFromCompressedPubkeyHex( pubkey );
+                // $( '.recipient_privkey' ).innerHTML = `Your privkey: <span>${privkey}</span>`;
+                if ( $( '.uncompressed' ).checked ) {
+                    $( '.recipient_pubkey' ).value = uncompressed_pubkey;
+                    $( '.recipient_pubkey_greybox' ).innerText = uncompressed_pubkey;
+                } else {
+                    $( '.recipient_pubkey' ).value = pubkey;
+                    $( '.recipient_pubkey_greybox' ).innerText = pubkey;
+                }
+                changeRecipient();
+            }
+            var changeRecipient = () => {
+                //check if pubkey is valid
+                var to_be_checked = $( '.recipient_pubkey' ).value;
+                if ( to_be_checked.length !== 66 && to_be_checked.length !== 130 ) {
+                    setTimeout( () => {$( '.recipient_pubkey' ).value = "";}, 10 );
+                    return;
+                }
+                if ( !isValidHex( to_be_checked ) ) {
+                    setTimeout( () => {$( '.recipient_pubkey' ).value = "";}, 10 );
+                    return;
+                }
+                if ( to_be_checked.length === 66 ) {
+                    pubkey = to_be_checked;
+                    uncompressed_pubkey = getUncompressedPubkeyHexFromCompressedPubkeyHex( to_be_checked );
+                } else {
+                    pubkey = getCompressedPubkeyHexFromUncompressedPubkeyHex( to_be_checked );
+                    uncompressed_pubkey = to_be_checked;
+                }
+                if ( $( '.uncompressed' ).checked ) {
+                    $( '.recipient_pubkey' ).value = uncompressed_pubkey;
+                    $( '.recipient_pubkey_greybox' ).innerText = uncompressed_pubkey;
+                } else {
+                    $( '.recipient_pubkey' ).value = pubkey;
+                    $( '.recipient_pubkey_greybox' ).innerText = pubkey;
+                }
+                $( '.recipient_pubkey' ).classList.add( "hidden" );
+                $( '.recipient_pubkey_greybox' ).classList.remove( "hidden" );
+                $( '.recipient_pubkey_greybox_label' ).classList.remove( "hidden" );
+            }
+            $( '.recipient_pubkey' ).onkeyup = changeRecipient;
+            $( '.compressed' ).onclick = () => {
+                $( '.uncompressed' ).checked = false;
+                $( '.recipient_pubkey' ).value = pubkey;
+                $( '.recipient_pubkey_greybox' ).innerText = pubkey;
+                changeRecipient();
+            }
+            $( '.uncompressed' ).onclick = () => {
+                $( '.compressed' ).checked = false;
+                $( '.recipient_pubkey' ).value = uncompressed_pubkey;
+                $( '.recipient_pubkey_greybox' ).innerText = uncompressed_pubkey;
+                changeRecipient();
+            }
+            $( '.create_transaction' ).onclick = async () => {
+                if ( !pubkey ) return alert( `enter a pubkey first (see step 3)` );
+                showModal( `loading...` );
+                var had_money = await addressOnceHadMoney( funding_address, "signet/" );
+                if ( !had_money ) {
+                    var content = `<p>Please send money to this address on signet:</p><p>${funding_address}</p><p>You can use this faucet if you don't have any signet coins:</p><p><a href="https://signet.dcorral.com/" target="_blank">Signet Faucet</a></p>`;
+                    showModal( content );
+                }
+                await loopTilAddressReceivesMoney( funding_address, "signet/" );
+                await waitSomeSeconds( 2 );
+                var txinfo = await addressReceivedMoneyInThisTx( funding_address, "signet/" );
+                modalVanish();
+                if ( !$( '.faq' ).classList.contains( "hidden" ) ) $( '.faq' ).classList.add( "hidden" );
+                var txid = txinfo[ 0 ];
+                var vout = txinfo[ 1 ];
+                var amnt = txinfo[ 2 ];
+                // var txid = prompt( `enter the txid that sent money to the funding address` );
+                // if ( !txid ) return;
+                // var vout = prompt( `and the vout` );
+                // if ( vout === "" || vout === null || vout === undefined ) return;
+                // if ( isNaN( vout ) ) return;
+                // vout = Number( vout );
+                // var amnt = Number( prompt( `and the amount` ) );
+                // if ( !amnt ) return;
+                to_pubkey_amnt = amnt - 500;
+                if ( $( '.uncompressed' ).checked ) to_pubkey_size = 41;
+                var tx = tapscript.Tx.create({
+                    vin: [{
+                        txid,
+                        vout,
+                        prevout: {
+                            value: amnt,
+                            scriptPubKey: [ 1, funding_pubkey ],
+                        }
+                    }],
+                    vout: [{
+                        value: to_pubkey_amnt,
+                        scriptPubKey: `${to_pubkey_size}${$( '.recipient_pubkey' ).value}ac`,
+                    }],
+                });
+                var sig = tapscript.Signer.taproot.sign( funding_privkey, tx, 0 ).hex;
+                tx.vin[ 0 ].witness = [ sig ];
+                $( '.tx_to_pubkey_greybox' ).innerText = tapscript.Tx.encode( tx ).hex;
+                to_pubkey_txid = tapscript.Tx.util.getTxid( tx );
+                $( '.to_pubkey_txid' ).innerHTML = `<a href="https://mempool.space/signet/tx/${to_pubkey_txid}" target="_blank">${to_pubkey_txid}</a>`;
+                if ( !privkey ) {
+                    $( '.enter_privkey_instructions' ).classList.remove( "hidden" );
+                    $( '.privkey_to_pubkey' ).classList.remove( "hidden" );
+                }
+                $( '.step_1' ).classList.add( "hidden" );
+                $( '.step_2' ).classList.add( "hidden" );
+                $( '.step_3' ).classList.add( "hidden" );
+                $( '.step_4' ).classList.add( "hidden" );
+                $( '.step_5' ).classList.remove( "hidden" );
+                $( '.step_6' ).classList.remove( "hidden" );
+                $( '.step_7' ).classList.remove( "hidden" );
+                $( '.step_8' ).classList.remove( "hidden" );
+                $( '.step_9' ).classList.remove( "hidden" );
+                window.scrollTo( 0, 0 );
+            }
+            $( '.final_transaction' ).onclick = async () => {
+                if ( !$( '.final_destination' ).value || !isValidAddress( $( '.final_destination' ).value ) ) return alert( `enter a valid bitcoin address first (see step 7) -- do NOT a raw pubkey this time` );
+                if ( privkey ) $( '.privkey_to_pubkey input' ).value = privkey;
+                var to_be_checked = $( '.privkey_to_pubkey input' ).value;
+                if ( to_be_checked.length !== 64 ) {
+                    setTimeout( () => {$( '.privkey_to_pubkey input' ).value = "";}, 10 );
+                    return;
+                }
+                if ( !isValidHex( to_be_checked ) ) {
+                    setTimeout( () => {$( '.privkey_to_pubkey input' ).value = "";}, 10 );
+                    return;
+                }
+                if ( !privkey ) privkey = to_be_checked;
+                var destino = $( '.final_destination' ).value.replaceAll( " ", "" );
+                var psbt = new bitcoinjs.Psbt({ network: bitcoinjs.networks.testnet })
+                .addInput({
+                    hash: to_pubkey_txid,
+                    index: 0,
+                    nonWitnessUtxo: Buffer.from( $( '.tx_to_pubkey_greybox' ).innerText, "hex" ),
+                })
+                .addOutput({
+                    value: to_pubkey_amnt - 500,
+                    script: Buffer.from( convertAddressToScriptPubkeyString( destino ), "hex" ),
+                });
+                var keyPairSender = bitcoinjs.ECPair.fromPrivateKey( Buffer.from( privkey, 'hex' ), bitcoinjs.networks.testnet );
+                var tx = bitcoinjs.Transaction.fromBuffer( psbt.data.getTransaction() );
+                var sighash = tx.hashForSignature( 0, bitcoinjs.script.fromASM( `${$( '.recipient_pubkey' ).value} OP_CHECKSIG` ), bitcoinjs.Transaction.SIGHASH_ALL ).toString( "hex" );
+                var sig = keyPairSender.sign( Buffer.from( sighash, "hex" ) ).toString( "hex" );
+                sig = sigToDER( sig );
+                sig = sig + "01";
+                tx.ins[ 0 ].script = Buffer.from( bytesToHex( new Uint8Array( [ ( sig.length / 2 ), ...hexToBytes( sig ) ] ) ), "hex" );
+                var txhex = tx.toHex();
+                var from_pubkey_txid = tx.getId();
+                $( '.from_pubkey_txid' ).innerHTML = `<a href="https://mempool.space/signet/tx/${from_pubkey_txid}" target="_blank">${from_pubkey_txid}</a>`;
+                $( '.tx_from_pubkey_greybox' ).innerText = txhex;
+                $( '.tx_from_pubkey_greybox' ).classList.remove( "hidden" );
+                $( '.tx_from_pubkey_greybox_label' ).classList.remove( "hidden" );
+                $( '.from_pubkey_txid_label' ).classList.remove( "hidden" );
+                $( '.from_pubkey_txid' ).classList.remove( "hidden" );
+                $( '.from_pubkey_txid_label_2' ).classList.remove( "hidden" );
+            }
+        </script>
+        <div class="black-bg hidden"></div>
+        <div class="modal hidden"></div>
+    </body>
+</html>
