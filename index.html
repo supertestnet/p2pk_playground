@@ -649,7 +649,7 @@
                 window.scrollTo( 0, 0 );
             }
             $( '.final_transaction' ).onclick = async () => {
-                if ( !$( '.final_destination' ).value || !isValidAddress( $( '.final_destination' ).value ) ) return alert( `enter a valid bitcoin address first (see step 7) -- do NOT a raw pubkey this time` );
+                if ( !$( '.final_destination' ).value || !isValidAddress( $( '.final_destination' ).value ) ) return alert( `enter a valid bitcoin address first (see step 7) -- do NOT use a raw pubkey this time` );
                 if ( privkey ) $( '.privkey_to_pubkey input' ).value = privkey;
                 var to_be_checked = $( '.privkey_to_pubkey input' ).value;
                 if ( to_be_checked.length !== 64 ) {
